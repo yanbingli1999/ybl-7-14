@@ -116,13 +116,42 @@ router.post('/:id/variables', (req: Request, res: Response) => {
     res.status(400).json({ error: '变量名称不能为空' });
     return;
   }
-  if (dto.min >= dto.max) {
-    res.status(400).json({ error: '最小值必须小于最大值' });
-    return;
-  }
-  if (dto.mostLikely < dto.min || dto.mostLikely > dto.max) {
-    res.status(400).json({ error: '最可能值必须在最小值和最大值之间' });
-    return;
+
+  const distribution = dto.distribution || 'triangular';
+
+  if (distribution === 'triangular') {
+    if (dto.min >= dto.max) {
+      res.status(400).json({ error: '最小值必须小于最大值' });
+      return;
+    }
+    if (dto.mostLikely < dto.min || dto.mostLikely > dto.max) {
+      res.status(400).json({ error: '最可能值必须在最小值和最大值之间' });
+      return;
+    }
+  } else if (distribution === 'uniform') {
+    if (dto.min >= dto.max) {
+      res.status(400).json({ error: '最小值必须小于最大值' });
+      return;
+    }
+  } else if (distribution === 'normal') {
+    if (dto.normalMean === undefined || isNaN(Number(dto.normalMean))) {
+      res.status(400).json({ error: '正态分布均值不能为空' });
+      return;
+    }
+    if (dto.normalStdDev === undefined || isNaN(Number(dto.normalStdDev)) || Number(dto.normalStdDev) <= 0) {
+      res.status(400).json({ error: '正态分布标准差必须为正数' });
+      return;
+    }
+  } else if (distribution === 'discrete') {
+    if (!dto.discreteOptions || !Array.isArray(dto.discreteOptions) || dto.discreteOptions.length === 0) {
+      res.status(400).json({ error: '离散概率选项不能为空' });
+      return;
+    }
+    const totalProb = dto.discreteOptions.reduce((s, o) => s + Number(o.probability || 0), 0);
+    if (totalProb <= 0) {
+      res.status(400).json({ error: '离散概率总和必须大于0' });
+      return;
+    }
   }
 
   const variable: Variable = {
@@ -130,12 +159,16 @@ router.post('/:id/variables', (req: Request, res: Response) => {
     projectId,
     name: dto.name.trim(),
     type: dto.type || 'custom',
-    min: Number(dto.min),
-    max: Number(dto.max),
-    mostLikely: Number(dto.mostLikely),
+    min: Number(dto.min) ?? 0,
+    max: Number(dto.max) ?? 0,
+    mostLikely: Number(dto.mostLikely) ?? 0,
     weight: Number(dto.weight) ?? 1,
     unit: dto.unit?.trim() || '',
     createdAt: new Date().toISOString(),
+    distribution,
+    normalMean: dto.normalMean !== undefined ? Number(dto.normalMean) : undefined,
+    normalStdDev: dto.normalStdDev !== undefined ? Number(dto.normalStdDev) : undefined,
+    discreteOptions: dto.discreteOptions,
   };
 
   projectsStore.update(projectId, { updatedAt: new Date().toISOString() });

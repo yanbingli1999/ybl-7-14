@@ -1,4 +1,4 @@
-import type { Variable, SimulationResult, Percentiles, Histogram, HistogramBin, SensitivityItem } from './types';
+import type { Variable, SimulationResult, Percentiles, Histogram, HistogramBin, SensitivityItem, DiscreteOption } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
 export function sampleTriangular(min: number, mostLikely: number, max: number): number {
@@ -21,6 +21,48 @@ export function sampleTriangular(min: number, mostLikely: number, max: number): 
   }
 
   return result;
+}
+
+export function sampleNormal(mean: number, stdDev: number): number {
+  let u = 0, v = 0;
+  while (u === 0) u = Math.random();
+  while (v === 0) v = Math.random();
+  const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+  return mean + z * stdDev;
+}
+
+export function sampleUniform(min: number, max: number): number {
+  if (min > max) [min, max] = [max, min];
+  return min + Math.random() * (max - min);
+}
+
+export function sampleDiscrete(options: DiscreteOption[]): number {
+  if (options.length === 0) return 0;
+
+  const totalProb = options.reduce((s, o) => s + o.probability, 0);
+  if (totalProb <= 0) return options[0].value;
+
+  let r = Math.random() * totalProb;
+  for (const opt of options) {
+    r -= opt.probability;
+    if (r <= 0) return opt.value;
+  }
+  return options[options.length - 1].value;
+}
+
+export function sampleVariable(v: Variable): number {
+  const dist = v.distribution || 'triangular';
+  switch (dist) {
+    case 'normal':
+      return sampleNormal(v.normalMean ?? v.mostLikely, v.normalStdDev ?? (v.max - v.min) / 6);
+    case 'uniform':
+      return sampleUniform(v.min, v.max);
+    case 'discrete':
+      return sampleDiscrete(v.discreteOptions ?? []);
+    case 'triangular':
+    default:
+      return sampleTriangular(v.min, v.mostLikely, v.max);
+  }
 }
 
 export function calcMean(arr: number[]): number {
@@ -174,7 +216,7 @@ export function runMonteCarloSimulation(
   for (let i = 0; i < iterations; i++) {
     let iterResult = 0;
     for (const v of variables) {
-      const sample = sampleTriangular(v.min, v.mostLikely, v.max);
+      const sample = sampleVariable(v);
       variableSamples[v.id][i] = sample;
       iterResult += sample * v.weight;
     }

@@ -8,7 +8,7 @@ import {
 import { api } from '@/lib/api';
 import { useAppStore } from '@/store/useAppStore';
 import { formatNumber, formatPercentage } from '../../shared/monteCarlo.js';
-import type { VariableType, CreateVariableDto, UpdateVariableDto, SimulationResult } from '../../shared/types.js';
+import type { VariableType, DistributionType, DiscreteOption, CreateVariableDto, UpdateVariableDto, SimulationResult } from '../../shared/types.js';
 import HistogramChart from '@/components/HistogramChart';
 import SensitivityChart from '@/components/SensitivityChart';
 import StatsCards from '@/components/StatsCards';
@@ -20,6 +20,13 @@ const VARIABLE_TYPE_CONFIG: Record<VariableType, { label: string; color: string;
   duration: { label: '工期', color: 'bg-amber-500/20 text-amber-300 border-amber-500/40', icon: Clock, defaultWeight: -1, defaultUnit: '天' },
   revenue: { label: '收益', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40', icon: TrendingUp, defaultWeight: 1, defaultUnit: '万元' },
   custom: { label: '自定义', color: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40', icon: Settings, defaultWeight: 1, defaultUnit: '' },
+};
+
+const DISTRIBUTION_CONFIG: Record<DistributionType, { label: string; desc: string }> = {
+  triangular: { label: '三角分布', desc: '三点估算：最小值 / 最可能值 / 最大值' },
+  normal: { label: '正态分布', desc: '均值 ± 标准差（高斯分布）' },
+  uniform: { label: '均匀分布', desc: '最小值 ~ 最大值 等概率' },
+  discrete: { label: '离散概率', desc: '多个数值及其对应概率' },
 };
 
 export default function ProjectDetail() {
@@ -36,7 +43,10 @@ export default function ProjectDetail() {
   const [runProgress, setRunProgress] = useState(0);
 
   const [varForm, setVarForm] = useState<Partial<any>>({
-    name: '', type: 'custom' as VariableType, min: '', max: '', mostLikely: '', weight: '', unit: '',
+    name: '', type: 'custom' as VariableType, distribution: 'triangular' as DistributionType,
+    min: '', max: '', mostLikely: '', weight: '', unit: '',
+    normalMean: '', normalStdDev: '',
+    discreteOptions: [{ value: '', probability: '' }] as unknown as DiscreteOption[],
   });
   const [editForm, setEditForm] = useState<Partial<any>>({});
 
@@ -65,23 +75,75 @@ export default function ProjectDetail() {
     e.preventDefault();
     if (!currentProject || !varForm.name) return;
     try {
-      const payload: CreateVariableDto = {
+      const distribution = (varForm.distribution || 'triangular') as DistributionType;
+      const payload: any = {
         name: varForm.name,
         type: (varForm.type || 'custom') as VariableType,
         unit: varForm.unit || '',
-        min: Number(varForm.min),
-        max: Number(varForm.max),
-        mostLikely: Number(varForm.mostLikely),
         weight: Number(varForm.weight == null || varForm.weight === '' ? 1 : varForm.weight),
+        distribution,
+        min: Number(varForm.min ?? 0),
+        max: Number(varForm.max ?? 0),
+        mostLikely: Number(varForm.mostLikely ?? 0),
       };
-      if (!(payload.min < payload.mostLikely && payload.mostLikely < payload.max)) {
-        alert('参数必须满足：最小值 < 最可能值 < 最大值');
-        return;
+
+      if (distribution === 'triangular') {
+        payload.min = Number(varForm.min);
+        payload.max = Number(varForm.max);
+        payload.mostLikely = Number(varForm.mostLikely);
+        if (!(payload.min < payload.mostLikely && payload.mostLikely < payload.max)) {
+          alert('参数必须满足：最小值 < 最可能值 < 最大值');
+          return;
+        }
+      } else if (distribution === 'uniform') {
+        payload.min = Number(varForm.min);
+        payload.max = Number(varForm.max);
+        if (!(payload.min < payload.max)) {
+          alert('参数必须满足：最小值 < 最大值');
+          return;
+        }
+      } else if (distribution === 'normal') {
+        if (varForm.normalMean === '' || varForm.normalStdDev === '' || Number(varForm.normalStdDev) <= 0) {
+          alert('正态分布需要填写均值和正的标准差');
+          return;
+        }
+        payload.normalMean = Number(varForm.normalMean);
+        payload.normalStdDev = Number(varForm.normalStdDev);
+        payload.min = Number(varForm.min ?? (payload.normalMean - 3 * payload.normalStdDev));
+        payload.max = Number(varForm.max ?? (payload.normalMean + 3 * payload.normalStdDev));
+        payload.mostLikely = payload.normalMean;
+      } else if (distribution === 'discrete') {
+        const opts = (varForm.discreteOptions || []) as any[];
+        const validOpts = opts.filter(o => o.value !== '' && o.probability !== '' && Number(o.probability) >= 0).map(o => ({
+          value: Number(o.value),
+          probability: Number(o.probability),
+        }));
+        if (validOpts.length === 0) {
+          alert('请至少填写一个有效的离散选项');
+          return;
+        }
+        const totalProb = validOpts.reduce((s, o) => s + o.probability, 0);
+        if (totalProb <= 0) {
+          alert('离散概率总和必须大于0');
+          return;
+        }
+        payload.discreteOptions = validOpts;
+        const values = validOpts.map(o => o.value);
+        payload.min = Math.min(...values);
+        payload.max = Math.max(...values);
+        const weightedSum = validOpts.reduce((s, o) => s + o.value * o.probability, 0);
+        payload.mostLikely = weightedSum / totalProb;
       }
+
       const v = await api.projects.addVariable(id, payload);
       addVariable(v);
       setShowVarModal(false);
-      setVarForm({ name: '', type: 'custom' as VariableType, min: '', max: '', mostLikely: '', weight: '', unit: '' });
+      setVarForm({
+        name: '', type: 'custom' as VariableType, distribution: 'triangular' as DistributionType,
+        min: '', max: '', mostLikely: '', weight: '', unit: '',
+        normalMean: '', normalStdDev: '',
+        discreteOptions: [{ value: '', probability: '' }] as unknown as DiscreteOption[],
+      });
     } catch (err) {
       alert(err instanceof Error ? err.message : '添加失败');
     }
@@ -89,24 +151,87 @@ export default function ProjectDetail() {
 
   const startEdit = (v: any) => {
     setEditingId(v.id);
+    const dist = v.distribution || 'triangular';
     setEditForm({
       ...v,
+      distribution: dist,
       min: String(v.min),
       max: String(v.max),
       mostLikely: String(v.mostLikely),
       weight: String(v.weight),
+      normalMean: v.normalMean !== undefined ? String(v.normalMean) : '',
+      normalStdDev: v.normalStdDev !== undefined ? String(v.normalStdDev) : '',
+      discreteOptions: v.discreteOptions && v.discreteOptions.length > 0
+        ? v.discreteOptions.map((o: DiscreteOption) => ({ value: String(o.value), probability: String(o.probability) }))
+        : [{ value: '', probability: '' }],
     });
   };
 
   const handleSaveEdit = async (vId: string) => {
     try {
-      const payload: UpdateVariableDto = {
+      const distribution = (editForm.distribution || 'triangular') as DistributionType;
+      const payload: any = {
         ...editForm,
-        min: Number(editForm.min),
-        max: Number(editForm.max),
-        mostLikely: Number(editForm.mostLikely),
+        distribution,
+        min: Number(editForm.min ?? 0),
+        max: Number(editForm.max ?? 0),
+        mostLikely: Number(editForm.mostLikely ?? 0),
         weight: Number(editForm.weight),
       };
+
+      if (distribution === 'triangular') {
+        const mn = Number(editForm.min);
+        const ml = Number(editForm.mostLikely);
+        const mx = Number(editForm.max);
+        if (!(mn < ml && ml < mx)) {
+          alert('参数必须满足：最小值 < 最可能值 < 最大值');
+          return;
+        }
+        payload.min = mn;
+        payload.max = mx;
+        payload.mostLikely = ml;
+      } else if (distribution === 'uniform') {
+        const mn = Number(editForm.min);
+        const mx = Number(editForm.max);
+        if (!(mn < mx)) {
+          alert('参数必须满足：最小值 < 最大值');
+          return;
+        }
+        payload.min = mn;
+        payload.max = mx;
+      } else if (distribution === 'normal') {
+        if (editForm.normalMean === '' || editForm.normalStdDev === '' || Number(editForm.normalStdDev) <= 0) {
+          alert('正态分布需要填写均值和正的标准差');
+          return;
+        }
+        payload.normalMean = Number(editForm.normalMean);
+        payload.normalStdDev = Number(editForm.normalStdDev);
+        payload.min = Number(editForm.min ?? (payload.normalMean - 3 * payload.normalStdDev));
+        payload.max = Number(editForm.max ?? (payload.normalMean + 3 * payload.normalStdDev));
+        payload.mostLikely = payload.normalMean;
+      } else if (distribution === 'discrete') {
+        const opts = (editForm.discreteOptions || []) as any[];
+        const validOpts = opts.filter(o => o.value !== '' && o.probability !== '' && Number(o.probability) >= 0).map(o => ({
+          value: Number(o.value),
+          probability: Number(o.probability),
+        }));
+        if (validOpts.length === 0) {
+          alert('请至少填写一个有效的离散选项');
+          return;
+        }
+        const totalProb = validOpts.reduce((s, o) => s + o.probability, 0);
+        if (totalProb <= 0) {
+          alert('离散概率总和必须大于0');
+          return;
+        }
+        payload.discreteOptions = validOpts;
+        const values = validOpts.map(o => o.value);
+        payload.min = Math.min(...values);
+        payload.max = Math.max(...values);
+        const weightedSum = validOpts.reduce((s, o) => s + o.value * o.probability, 0);
+        payload.mostLikely = weightedSum / totalProb;
+      }
+
       const v = await api.variables.update(vId, payload);
       updateVariable(v);
       setEditingId(null);
@@ -217,14 +342,13 @@ export default function ProjectDetail() {
                 </button>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[700px]">
+                <table className="w-full min-w-[850px]">
                   <thead>
                     <tr className="border-b border-monte-border">
                       <th className="th">变量</th>
                       <th className="th">类型</th>
-                      <th className="th">最小值</th>
-                      <th className="th">最可能</th>
-                      <th className="th">最大值</th>
+                      <th className="th">分布</th>
+                      <th className="th">参数</th>
                       <th className="th">权重</th>
                       <th className="th text-right">操作</th>
                     </tr>
@@ -232,7 +356,7 @@ export default function ProjectDetail() {
                   <tbody className="divide-y divide-monte-border/50">
                     {currentProject.variables.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="td text-center text-monte-muted py-10">
+                        <td colSpan={6} className="td text-center text-monte-muted py-10">
                           <div className="flex flex-col items-center gap-2">
                             <Settings className="w-8 h-8 text-monte-muted/50" />
                             <p>暂无变量，点击右上角添加</p>
@@ -242,6 +366,8 @@ export default function ProjectDetail() {
                     ) : currentProject.variables.map(v => {
                       const config = VARIABLE_TYPE_CONFIG[v.type];
                       const Icon = config.icon;
+                      const dist = v.distribution || 'triangular';
+                      const distCfg = DISTRIBUTION_CONFIG[dist];
                       const isEditing = editingId === v.id;
                       return (
                         <tr key={v.id} className="hover:bg-monte-bg/40 transition-colors">
@@ -272,22 +398,145 @@ export default function ProjectDetail() {
                           </td>
                           <td className="td">
                             {isEditing ? (
-                              <input type="text" inputMode="decimal" value={editForm.min ?? ''} onChange={e => { const v = e.target.value; setEditForm({ ...editForm, min: v === '' ? '' : Number(v) }); }} className="input !py-1 !text-sm font-mono" />
-                            ) : <span className="font-mono text-monte-muted">{formatNumber(v.min, 0)}</span>}
+                              <select
+                                value={editForm.distribution ?? dist}
+                                onChange={e => setEditForm({ ...editForm, distribution: e.target.value as DistributionType })}
+                                className="input !py-1 !text-sm"
+                              >
+                                <option value="triangular">三角</option>
+                                <option value="normal">正态</option>
+                                <option value="uniform">均匀</option>
+                                <option value="discrete">离散</option>
+                              </select>
+                            ) : (
+                              <span className="badge border bg-monte-accent/15 text-monte-accent border-monte-accent/30" title={distCfg.desc}>
+                                {distCfg.label}
+                              </span>
+                            )}
                           </td>
                           <td className="td">
                             {isEditing ? (
-                              <input type="text" inputMode="decimal" value={editForm.mostLikely ?? ''} onChange={e => { const v = e.target.value; setEditForm({ ...editForm, mostLikely: v === '' ? '' : Number(v) }); }} className="input !py-1 !text-sm font-mono !border-monte-accent/60" />
-                            ) : <span className="font-mono text-monte-accent font-medium">{formatNumber(v.mostLikely, 0)}</span>}
+                              <div className="space-y-2 min-w-[260px]">
+                                {((editForm.distribution ?? dist) === 'triangular') && (
+                                  <div className="grid grid-cols-3 gap-1.5">
+                                    <div>
+                                      <div className="text-[10px] text-monte-danger mb-0.5">最小</div>
+                                      <input type="text" inputMode="decimal" value={editForm.min ?? ''} onChange={e => { const vv = e.target.value; setEditForm({ ...editForm, min: vv === '' ? '' : Number(vv) }); }} className="input !py-1 !text-xs font-mono !border-monte-danger/50" />
+                                    </div>
+                                    <div>
+                                      <div className="text-[10px] text-monte-accent mb-0.5">最可能</div>
+                                      <input type="text" inputMode="decimal" value={editForm.mostLikely ?? ''} onChange={e => { const vv = e.target.value; setEditForm({ ...editForm, mostLikely: vv === '' ? '' : Number(vv) }); }} className="input !py-1 !text-xs font-mono !border-monte-accent/60" />
+                                    </div>
+                                    <div>
+                                      <div className="text-[10px] text-monte-safe mb-0.5">最大</div>
+                                      <input type="text" inputMode="decimal" value={editForm.max ?? ''} onChange={e => { const vv = e.target.value; setEditForm({ ...editForm, max: vv === '' ? '' : Number(vv) }); }} className="input !py-1 !text-xs font-mono !border-monte-safe/50" />
+                                    </div>
+                                  </div>
+                                )}
+                                {((editForm.distribution ?? dist) === 'uniform') && (
+                                  <div className="grid grid-cols-2 gap-1.5">
+                                    <div>
+                                      <div className="text-[10px] text-monte-danger mb-0.5">最小</div>
+                                      <input type="text" inputMode="decimal" value={editForm.min ?? ''} onChange={e => { const vv = e.target.value; setEditForm({ ...editForm, min: vv === '' ? '' : Number(vv) }); }} className="input !py-1 !text-xs font-mono !border-monte-danger/50" />
+                                    </div>
+                                    <div>
+                                      <div className="text-[10px] text-monte-safe mb-0.5">最大</div>
+                                      <input type="text" inputMode="decimal" value={editForm.max ?? ''} onChange={e => { const vv = e.target.value; setEditForm({ ...editForm, max: vv === '' ? '' : Number(vv) }); }} className="input !py-1 !text-xs font-mono !border-monte-safe/50" />
+                                    </div>
+                                  </div>
+                                )}
+                                {((editForm.distribution ?? dist) === 'normal') && (
+                                  <div className="grid grid-cols-2 gap-1.5">
+                                    <div>
+                                      <div className="text-[10px] text-monte-accent mb-0.5">均值 μ</div>
+                                      <input type="text" inputMode="decimal" value={editForm.normalMean ?? ''} onChange={e => { const vv = e.target.value; setEditForm({ ...editForm, normalMean: vv === '' ? '' : Number(vv) }); }} className="input !py-1 !text-xs font-mono !border-monte-accent/60" />
+                                    </div>
+                                    <div>
+                                      <div className="text-[10px] text-purple-300 mb-0.5">标准差 σ</div>
+                                      <input type="text" inputMode="decimal" value={editForm.normalStdDev ?? ''} onChange={e => { const vv = e.target.value; setEditForm({ ...editForm, normalStdDev: vv === '' ? '' : Number(vv) }); }} className="input !py-1 !text-xs font-mono !border-purple-400/50" />
+                                    </div>
+                                  </div>
+                                )}
+                                {((editForm.distribution ?? dist) === 'discrete') && (
+                                  <div className="space-y-1.5">
+                                    {(editForm.discreteOptions || []).map((opt: any, idx: number) => (
+                                      <div key={idx} className="grid grid-cols-2 gap-1.5 items-center">
+                                        <input type="text" inputMode="decimal" placeholder="数值" value={opt.value ?? ''} onChange={e => {
+                                          const vv = e.target.value;
+                                          const newOpts = [...(editForm.discreteOptions || [])];
+                                          newOpts[idx] = { ...newOpts[idx], value: vv === '' ? '' : Number(vv) };
+                                          setEditForm({ ...editForm, discreteOptions: newOpts });
+                                        }} className="input !py-1 !text-xs font-mono" />
+                                        <div className="flex items-center gap-1">
+                                          <input type="text" inputMode="decimal" placeholder="概率" value={opt.probability ?? ''} onChange={e => {
+                                            const vv = e.target.value;
+                                            const newOpts = [...(editForm.discreteOptions || [])];
+                                            newOpts[idx] = { ...newOpts[idx], probability: vv === '' ? '' : Number(vv) };
+                                            setEditForm({ ...editForm, discreteOptions: newOpts });
+                                          }} className="input !py-1 !text-xs font-mono !flex-1" />
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const newOpts = [...(editForm.discreteOptions || [])];
+                                              newOpts.splice(idx, 1);
+                                              setEditForm({ ...editForm, discreteOptions: newOpts.length > 0 ? newOpts : [{ value: '', probability: '' }] });
+                                            }}
+                                            className="p-1 rounded text-monte-muted hover:text-monte-danger hover:bg-monte-danger/10"
+                                          >
+                                            <X className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditForm({ ...editForm, discreteOptions: [...(editForm.discreteOptions || []), { value: '', probability: '' }] })}
+                                      className="text-xs text-monte-accent hover:text-monte-accent/80 flex items-center gap-1"
+                                    >
+                                      <Plus className="w-3 h-3" /> 添加选项
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="font-mono text-xs">
+                                {dist === 'triangular' && (
+                                  <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                                    <span className="text-monte-danger">min={formatNumber(v.min, 0)}</span>
+                                    <span className="text-monte-accent font-medium">ml={formatNumber(v.mostLikely, 0)}</span>
+                                    <span className="text-monte-safe">max={formatNumber(v.max, 0)}</span>
+                                  </div>
+                                )}
+                                {dist === 'uniform' && (
+                                  <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                                    <span className="text-monte-danger">[{formatNumber(v.min, 0)}</span>
+                                    <span className="text-monte-muted">,</span>
+                                    <span className="text-monte-safe">{formatNumber(v.max, 0)}]</span>
+                                  </div>
+                                )}
+                                {dist === 'normal' && (
+                                  <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                                    <span className="text-monte-accent">μ={formatNumber(v.normalMean ?? v.mostLikely, 0)}</span>
+                                    <span className="text-purple-300">σ={formatNumber(v.normalStdDev ?? (v.max - v.min) / 6, 1)}</span>
+                                  </div>
+                                )}
+                                {dist === 'discrete' && (
+                                  <div className="flex flex-wrap gap-1">
+                                    {(v.discreteOptions || []).map((o: DiscreteOption, i: number) => (
+                                      <span key={i} className="px-1.5 py-0.5 rounded bg-monte-bg/70 border border-monte-border/60">
+                                        <span className="text-monte-accent">{formatNumber(o.value, 0)}</span>
+                                        <span className="text-monte-muted mx-0.5">:</span>
+                                        <span className="text-monte-safe">{formatNumber(o.probability, 2)}</span>
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </td>
                           <td className="td">
                             {isEditing ? (
-                              <input type="text" inputMode="decimal" value={editForm.max ?? ''} onChange={e => { const v = e.target.value; setEditForm({ ...editForm, max: v === '' ? '' : Number(v) }); }} className="input !py-1 !text-sm font-mono" />
-                            ) : <span className="font-mono text-monte-muted">{formatNumber(v.max, 0)}</span>}
-                          </td>
-                          <td className="td">
-                            {isEditing ? (
-                              <input type="text" inputMode="decimal" value={editForm.weight ?? ''} onChange={e => { const v = e.target.value; setEditForm({ ...editForm, weight: v === '' ? '' : Number(v) }); }} className="input !py-1 !text-sm font-mono" />
+                              <input type="text" inputMode="decimal" value={editForm.weight ?? ''} onChange={e => { const vv = e.target.value; setEditForm({ ...editForm, weight: vv === '' ? '' : Number(vv) }); }} className="input !py-1 !text-sm font-mono w-20" />
                             ) : (
                               <span className={`font-mono font-medium ${v.weight < 0 ? 'text-monte-danger' : 'text-monte-safe'}`}>
                                 {v.weight > 0 ? '+' : ''}{formatNumber(v.weight, 1)}
@@ -563,63 +812,256 @@ export default function ProjectDetail() {
                   </select>
                 </div>
                 <div>
-                  <label className="label">单位</label>
-                  <input
-                    type="text"
-                    value={varForm.unit || ''}
-                    onChange={e => setVarForm({ ...varForm, unit: e.target.value })}
-                    placeholder="万元、天、人..."
+                  <label className="label">抽样分布</label>
+                  <select
+                    value={varForm.distribution || 'triangular'}
+                    onChange={e => {
+                      const d = e.target.value as DistributionType;
+                      setVarForm({ ...varForm, distribution: d });
+                    }}
                     className="input"
-                  />
+                  >
+                    <option value="triangular">三角分布</option>
+                    <option value="normal">正态分布</option>
+                    <option value="uniform">均匀分布</option>
+                    <option value="discrete">离散概率</option>
+                  </select>
                 </div>
               </div>
+              <div className="text-xs text-monte-muted -mt-2">
+                {DISTRIBUTION_CONFIG[(varForm.distribution || 'triangular') as DistributionType].desc}
+              </div>
+              <div>
+                <label className="label">单位</label>
+                <input
+                  type="text"
+                  value={varForm.unit || ''}
+                  onChange={e => setVarForm({ ...varForm, unit: e.target.value })}
+                  placeholder="万元、天、人..."
+                  className="input"
+                />
+              </div>
+
               <div className="p-4 rounded-xl bg-monte-bg/50 border border-monte-border space-y-4">
-                <div className="text-xs text-monte-muted font-semibold">三角分布参数（三点估算）</div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="label text-monte-danger">最小值</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={varForm.min ?? ''}
-                      onChange={e => {
-                        const v = e.target.value;
-                        setVarForm({ ...varForm, min: v === '' ? '' : Number(v) });
-                      }}
-                      placeholder="最小范围"
-                      className="input font-mono !border-monte-danger/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="label text-monte-accent">最可能值</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={varForm.mostLikely ?? ''}
-                      onChange={e => {
-                        const v = e.target.value;
-                        setVarForm({ ...varForm, mostLikely: v === '' ? '' : Number(v) });
-                      }}
-                      placeholder="最可能发生"
-                      className="input font-mono !border-monte-accent/60"
-                    />
-                  </div>
-                  <div>
-                    <label className="label text-monte-safe">最大值</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={varForm.max ?? ''}
-                      onChange={e => {
-                        const v = e.target.value;
-                        setVarForm({ ...varForm, max: v === '' ? '' : Number(v) });
-                      }}
-                      placeholder="最大范围"
-                      className="input font-mono !border-monte-safe/50"
-                    />
-                  </div>
-                </div>
-                <div>
+                {((varForm.distribution || 'triangular') === 'triangular') && (
+                  <>
+                    <div className="text-xs text-monte-muted font-semibold">三角分布参数（三点估算）</div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="label text-monte-danger">最小值</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={varForm.min ?? ''}
+                          onChange={e => {
+                            const v = e.target.value;
+                            setVarForm({ ...varForm, min: v === '' ? '' : Number(v) });
+                          }}
+                          placeholder="最小范围"
+                          className="input font-mono !border-monte-danger/50"
+                        />
+                      </div>
+                      <div>
+                        <label className="label text-monte-accent">最可能值</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={varForm.mostLikely ?? ''}
+                          onChange={e => {
+                            const v = e.target.value;
+                            setVarForm({ ...varForm, mostLikely: v === '' ? '' : Number(v) });
+                          }}
+                          placeholder="最可能发生"
+                          className="input font-mono !border-monte-accent/60"
+                        />
+                      </div>
+                      <div>
+                        <label className="label text-monte-safe">最大值</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={varForm.max ?? ''}
+                          onChange={e => {
+                            const v = e.target.value;
+                            setVarForm({ ...varForm, max: v === '' ? '' : Number(v) });
+                          }}
+                          placeholder="最大范围"
+                          className="input font-mono !border-monte-safe/50"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {((varForm.distribution || 'triangular') === 'uniform') && (
+                  <>
+                    <div className="text-xs text-monte-muted font-semibold">均匀分布参数（等概率区间）</div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="label text-monte-danger">最小值</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={varForm.min ?? ''}
+                          onChange={e => {
+                            const v = e.target.value;
+                            setVarForm({ ...varForm, min: v === '' ? '' : Number(v) });
+                          }}
+                          placeholder="最小范围"
+                          className="input font-mono !border-monte-danger/50"
+                        />
+                      </div>
+                      <div>
+                        <label className="label text-monte-safe">最大值</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={varForm.max ?? ''}
+                          onChange={e => {
+                            const v = e.target.value;
+                            setVarForm({ ...varForm, max: v === '' ? '' : Number(v) });
+                          }}
+                          placeholder="最大范围"
+                          className="input font-mono !border-monte-safe/50"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {((varForm.distribution || 'triangular') === 'normal') && (
+                  <>
+                    <div className="text-xs text-monte-muted font-semibold">正态分布参数（高斯分布）</div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="label text-monte-accent">均值 μ</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={varForm.normalMean ?? ''}
+                          onChange={e => {
+                            const v = e.target.value;
+                            setVarForm({ ...varForm, normalMean: v === '' ? '' : Number(v) });
+                          }}
+                          placeholder="例如: 100"
+                          className="input font-mono !border-monte-accent/60"
+                        />
+                      </div>
+                      <div>
+                        <label className="label text-purple-300">标准差 σ</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={varForm.normalStdDev ?? ''}
+                          onChange={e => {
+                            const v = e.target.value;
+                            setVarForm({ ...varForm, normalStdDev: v === '' ? '' : Number(v) });
+                          }}
+                          placeholder="正数，例如: 15"
+                          className="input font-mono !border-purple-400/50"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-monte-muted mt-1">
+                      可选：设置 min/max 截断范围（留空默认 ±3σ）
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="label text-monte-muted text-xs">截断最小值（可选）</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={varForm.min ?? ''}
+                          onChange={e => {
+                            const v = e.target.value;
+                            setVarForm({ ...varForm, min: v === '' ? '' : Number(v) });
+                          }}
+                          placeholder="可选"
+                          className="input font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="label text-monte-muted text-xs">截断最大值（可选）</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={varForm.max ?? ''}
+                          onChange={e => {
+                            const v = e.target.value;
+                            setVarForm({ ...varForm, max: v === '' ? '' : Number(v) });
+                          }}
+                          placeholder="可选"
+                          className="input font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {((varForm.distribution || 'triangular') === 'discrete') && (
+                  <>
+                    <div className="text-xs text-monte-muted font-semibold flex items-center justify-between">
+                      <span>离散概率选项（数值 + 概率权重）</span>
+                      <button
+                        type="button"
+                        onClick={() => setVarForm({ ...varForm, discreteOptions: [...(varForm.discreteOptions || []), { value: '', probability: '' }] })}
+                        className="text-monte-accent hover:text-monte-accent/80 flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" /> 添加
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {(varForm.discreteOptions || []).map((opt: any, idx: number) => (
+                        <div key={idx} className="grid grid-cols-2 gap-2 items-center">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="数值"
+                            value={opt.value ?? ''}
+                            onChange={e => {
+                              const vv = e.target.value;
+                              const newOpts = [...(varForm.discreteOptions || [])];
+                              newOpts[idx] = { ...newOpts[idx], value: vv === '' ? '' : Number(vv) };
+                              setVarForm({ ...varForm, discreteOptions: newOpts });
+                            }}
+                            className="input font-mono !py-2"
+                          />
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              placeholder="概率权重"
+                              value={opt.probability ?? ''}
+                              onChange={e => {
+                                const vv = e.target.value;
+                                const newOpts = [...(varForm.discreteOptions || [])];
+                                newOpts[idx] = { ...newOpts[idx], probability: vv === '' ? '' : Number(vv) };
+                                setVarForm({ ...varForm, discreteOptions: newOpts });
+                              }}
+                              className="input font-mono !py-2 !flex-1"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newOpts = [...(varForm.discreteOptions || [])];
+                                newOpts.splice(idx, 1);
+                                setVarForm({ ...varForm, discreteOptions: newOpts.length > 0 ? newOpts : [{ value: '', probability: '' }] });
+                              }}
+                              className="p-1.5 rounded-lg text-monte-muted hover:text-monte-danger hover:bg-monte-danger/10"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-monte-muted">
+                      提示：概率权重会自动归一化，总和可以不为 1
+                    </p>
+                  </>
+                )}
+
+                <div className="pt-2 border-t border-monte-border/60">
                   <label className="label">权重 (符号决定加减，可输入小数)</label>
                   <input
                     type="text"
@@ -637,11 +1079,21 @@ export default function ProjectDetail() {
                   </p>
                 </div>
               </div>
+
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowVarModal(false)} className="btn-secondary flex-1">
                   取消
                 </button>
-                <button type="submit" disabled={!varForm.name || typeof varForm.min !== 'number' || typeof varForm.max !== 'number' || typeof varForm.mostLikely !== 'number'} className="btn-primary flex-1">
+                <button
+                  type="submit"
+                  disabled={
+                    !varForm.name ||
+                    ((varForm.distribution || 'triangular') === 'triangular' && (typeof varForm.min !== 'number' || typeof varForm.max !== 'number' || typeof varForm.mostLikely !== 'number')) ||
+                    ((varForm.distribution || 'triangular') === 'uniform' && (typeof varForm.min !== 'number' || typeof varForm.max !== 'number')) ||
+                    ((varForm.distribution || 'triangular') === 'normal' && (varForm.normalMean === '' || varForm.normalStdDev === '' || Number(varForm.normalStdDev) <= 0))
+                  }
+                  className="btn-primary flex-1"
+                >
                   添加变量
                 </button>
               </div>

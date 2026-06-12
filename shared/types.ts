@@ -1,5 +1,12 @@
 export type VariableType = 'cost' | 'duration' | 'revenue' | 'custom';
 
+export type DistributionType = 'triangular' | 'normal' | 'uniform' | 'discrete';
+
+export interface DiscreteOption {
+  value: number;
+  probability: number;
+}
+
 export interface Variable {
   id: string;
   projectId: string;
@@ -11,6 +18,10 @@ export interface Variable {
   weight: number;
   unit: string;
   createdAt: string;
+  distribution?: DistributionType;
+  normalMean?: number;
+  normalStdDev?: number;
+  discreteOptions?: DiscreteOption[];
 }
 
 export interface Project {
@@ -97,6 +108,10 @@ export interface CreateVariableDto {
   mostLikely: number;
   weight: number;
   unit: string;
+  distribution?: DistributionType;
+  normalMean?: number;
+  normalStdDev?: number;
+  discreteOptions?: DiscreteOption[];
 }
 
 export interface UpdateVariableDto {
@@ -107,6 +122,10 @@ export interface UpdateVariableDto {
   mostLikely?: number;
   weight?: number;
   unit?: string;
+  distribution?: DistributionType;
+  normalMean?: number;
+  normalStdDev?: number;
+  discreteOptions?: DiscreteOption[];
 }
 
 export interface RunSimulationDto {
