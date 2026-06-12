@@ -1,0 +1,77 @@
+﻿# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+build/
+.out/
+
+# Environment files
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Caches and temporary files
+.cache/
+.parcel-cache/
+.turbo/
+.next/
+.nuxt/
+.svelte-kit/
+.vite/
+.vitest/
+.eslintcache
+*.tsbuildinfo
+tmp/
+temp/
+coverage/
+
+# Runtime/local data
+data/*.json
+!data/.gitkeep
+
+# Large archives and generated binaries
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+*.gz
+*.iso
+*.dmg
+*.exe
+*.msi
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.psd
+*.ai
+
+# Local tool metadata / sessions
+.trae/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
