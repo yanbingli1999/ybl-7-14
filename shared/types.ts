@@ -21,6 +21,7 @@ export interface Variable {
   distribution?: DistributionType;
   normalMean?: number;
   normalStdDev?: number;
+  normalTruncated?: boolean;
   discreteOptions?: DiscreteOption[];
 }
 
@@ -111,6 +112,7 @@ export interface CreateVariableDto {
   distribution?: DistributionType;
   normalMean?: number;
   normalStdDev?: number;
+  normalTruncated?: boolean;
   discreteOptions?: DiscreteOption[];
 }
 
@@ -125,6 +127,7 @@ export interface UpdateVariableDto {
   distribution?: DistributionType;
   normalMean?: number;
   normalStdDev?: number;
+  normalTruncated?: boolean;
   discreteOptions?: DiscreteOption[];
 }
 

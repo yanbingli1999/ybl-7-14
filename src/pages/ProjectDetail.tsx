@@ -45,7 +45,7 @@ export default function ProjectDetail() {
   const [varForm, setVarForm] = useState<Partial<any>>({
     name: '', type: 'custom' as VariableType, distribution: 'triangular' as DistributionType,
     min: '', max: '', mostLikely: '', weight: '', unit: '',
-    normalMean: '', normalStdDev: '',
+    normalMean: '', normalStdDev: '', normalTruncated: false,
     discreteOptions: [{ value: '', probability: '' }] as unknown as DiscreteOption[],
   });
   const [editForm, setEditForm] = useState<Partial<any>>({});
@@ -109,8 +109,22 @@ export default function ProjectDetail() {
         }
         payload.normalMean = Number(varForm.normalMean);
         payload.normalStdDev = Number(varForm.normalStdDev);
-        payload.min = Number(varForm.min ?? (payload.normalMean - 3 * payload.normalStdDev));
-        payload.max = Number(varForm.max ?? (payload.normalMean + 3 * payload.normalStdDev));
+        payload.normalTruncated = varForm.normalTruncated === true;
+        if (payload.normalTruncated) {
+          if (varForm.min === '' || varForm.max === '') {
+            alert('启用截断范围时必须填写最小值和最大值');
+            return;
+          }
+          if (!(Number(varForm.min) < Number(varForm.max))) {
+            alert('参数必须满足：最小值 < 最大值');
+            return;
+          }
+          payload.min = Number(varForm.min);
+          payload.max = Number(varForm.max);
+        } else {
+          payload.min = Number(varForm.min ?? (payload.normalMean - 3 * payload.normalStdDev));
+          payload.max = Number(varForm.max ?? (payload.normalMean + 3 * payload.normalStdDev));
+        }
         payload.mostLikely = payload.normalMean;
       } else if (distribution === 'discrete') {
         const opts = (varForm.discreteOptions || []) as any[];
@@ -141,7 +155,7 @@ export default function ProjectDetail() {
       setVarForm({
         name: '', type: 'custom' as VariableType, distribution: 'triangular' as DistributionType,
         min: '', max: '', mostLikely: '', weight: '', unit: '',
-        normalMean: '', normalStdDev: '',
+        normalMean: '', normalStdDev: '', normalTruncated: false,
         discreteOptions: [{ value: '', probability: '' }] as unknown as DiscreteOption[],
       });
     } catch (err) {
@@ -161,6 +175,7 @@ export default function ProjectDetail() {
       weight: String(v.weight),
       normalMean: v.normalMean !== undefined ? String(v.normalMean) : '',
       normalStdDev: v.normalStdDev !== undefined ? String(v.normalStdDev) : '',
+      normalTruncated: v.normalTruncated === true,
       discreteOptions: v.discreteOptions && v.discreteOptions.length > 0
         ? v.discreteOptions.map((o: DiscreteOption) => ({ value: String(o.value), probability: String(o.probability) }))
         : [{ value: '', probability: '' }],
@@ -206,8 +221,24 @@ export default function ProjectDetail() {
         }
         payload.normalMean = Number(editForm.normalMean);
         payload.normalStdDev = Number(editForm.normalStdDev);
-        payload.min = Number(editForm.min ?? (payload.normalMean - 3 * payload.normalStdDev));
-        payload.max = Number(editForm.max ?? (payload.normalMean + 3 * payload.normalStdDev));
+        payload.normalTruncated = editForm.normalTruncated === true;
+        if (payload.normalTruncated) {
+          if (editForm.min === '' || editForm.max === '') {
+            alert('启用截断范围时必须填写最小值和最大值');
+            return;
+          }
+          const mn = Number(editForm.min);
+          const mx = Number(editForm.max);
+          if (!(mn < mx)) {
+            alert('参数必须满足：最小值 < 最大值');
+            return;
+          }
+          payload.min = mn;
+          payload.max = mx;
+        } else {
+          payload.min = Number(editForm.min ?? (payload.normalMean - 3 * payload.normalStdDev));
+          payload.max = Number(editForm.max ?? (payload.normalMean + 3 * payload.normalStdDev));
+        }
         payload.mostLikely = payload.normalMean;
       } else if (distribution === 'discrete') {
         const opts = (editForm.discreteOptions || []) as any[];
@@ -446,15 +477,38 @@ export default function ProjectDetail() {
                                   </div>
                                 )}
                                 {((editForm.distribution ?? dist) === 'normal') && (
-                                  <div className="grid grid-cols-2 gap-1.5">
-                                    <div>
-                                      <div className="text-[10px] text-monte-accent mb-0.5">均值 μ</div>
-                                      <input type="text" inputMode="decimal" value={editForm.normalMean ?? ''} onChange={e => { const vv = e.target.value; setEditForm({ ...editForm, normalMean: vv === '' ? '' : Number(vv) }); }} className="input !py-1 !text-xs font-mono !border-monte-accent/60" />
+                                  <div className="space-y-2">
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                      <div>
+                                        <div className="text-[10px] text-monte-accent mb-0.5">均值 μ</div>
+                                        <input type="text" inputMode="decimal" value={editForm.normalMean ?? ''} onChange={e => { const vv = e.target.value; setEditForm({ ...editForm, normalMean: vv === '' ? '' : Number(vv) }); }} className="input !py-1 !text-xs font-mono !border-monte-accent/60" />
+                                      </div>
+                                      <div>
+                                        <div className="text-[10px] text-purple-300 mb-0.5">标准差 σ</div>
+                                        <input type="text" inputMode="decimal" value={editForm.normalStdDev ?? ''} onChange={e => { const vv = e.target.value; setEditForm({ ...editForm, normalStdDev: vv === '' ? '' : Number(vv) }); }} className="input !py-1 !text-xs font-mono !border-purple-400/50" />
+                                      </div>
                                     </div>
-                                    <div>
-                                      <div className="text-[10px] text-purple-300 mb-0.5">标准差 σ</div>
-                                      <input type="text" inputMode="decimal" value={editForm.normalStdDev ?? ''} onChange={e => { const vv = e.target.value; setEditForm({ ...editForm, normalStdDev: vv === '' ? '' : Number(vv) }); }} className="input !py-1 !text-xs font-mono !border-purple-400/50" />
-                                    </div>
+                                    <label className="flex items-center gap-1.5 cursor-pointer text-xs">
+                                      <input
+                                        type="checkbox"
+                                        checked={editForm.normalTruncated === true}
+                                        onChange={e => setEditForm({ ...editForm, normalTruncated: e.target.checked })}
+                                        className="accent-monte-accent"
+                                      />
+                                      <span className="text-monte-muted">启用截断范围</span>
+                                    </label>
+                                    {(editForm.normalTruncated === true) && (
+                                      <div className="grid grid-cols-2 gap-1.5">
+                                        <div>
+                                          <div className="text-[10px] text-monte-danger mb-0.5">截断最小值</div>
+                                          <input type="text" inputMode="decimal" value={editForm.min ?? ''} onChange={e => { const vv = e.target.value; setEditForm({ ...editForm, min: vv === '' ? '' : Number(vv) }); }} className="input !py-1 !text-xs font-mono !border-monte-danger/50" />
+                                        </div>
+                                        <div>
+                                          <div className="text-[10px] text-monte-safe mb-0.5">截断最大值</div>
+                                          <input type="text" inputMode="decimal" value={editForm.max ?? ''} onChange={e => { const vv = e.target.value; setEditForm({ ...editForm, max: vv === '' ? '' : Number(vv) }); }} className="input !py-1 !text-xs font-mono !border-monte-safe/50" />
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                                 {((editForm.distribution ?? dist) === 'discrete') && (
@@ -515,9 +569,19 @@ export default function ProjectDetail() {
                                   </div>
                                 )}
                                 {dist === 'normal' && (
-                                  <div className="flex flex-wrap gap-x-2 gap-y-0.5">
-                                    <span className="text-monte-accent">μ={formatNumber(v.normalMean ?? v.mostLikely, 0)}</span>
-                                    <span className="text-purple-300">σ={formatNumber(v.normalStdDev ?? (v.max - v.min) / 6, 1)}</span>
+                                  <div className="space-y-0.5">
+                                    <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                                      <span className="text-monte-accent">μ={formatNumber(v.normalMean ?? v.mostLikely, 0)}</span>
+                                      <span className="text-purple-300">σ={formatNumber(v.normalStdDev ?? (v.max - v.min) / 6, 1)}</span>
+                                    </div>
+                                    {v.normalTruncated === true && (
+                                      <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px]">
+                                        <span className="text-monte-warn">(截断</span>
+                                        <span className="text-monte-danger">[{formatNumber(v.min, 0)}</span>
+                                        <span className="text-monte-muted">,</span>
+                                        <span className="text-monte-safe">{formatNumber(v.max, 0)}])</span>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                                 {dist === 'discrete' && (
@@ -962,39 +1026,52 @@ export default function ProjectDetail() {
                         />
                       </div>
                     </div>
-                    <p className="text-xs text-monte-muted mt-1">
-                      可选：设置 min/max 截断范围（留空默认 ±3σ）
-                    </p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="label text-monte-muted text-xs">截断最小值（可选）</label>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={varForm.min ?? ''}
-                          onChange={e => {
-                            const v = e.target.value;
-                            setVarForm({ ...varForm, min: v === '' ? '' : Number(v) });
-                          }}
-                          placeholder="可选"
-                          className="input font-mono text-xs"
-                        />
+                    <label className="flex items-center gap-2 cursor-pointer text-sm">
+                      <input
+                        type="checkbox"
+                        checked={varForm.normalTruncated === true}
+                        onChange={e => setVarForm({ ...varForm, normalTruncated: e.target.checked })}
+                        className="accent-monte-accent w-4 h-4"
+                      />
+                      <span className="text-monte-muted">启用截断范围（抽样结果强制落在 [最小值, 最大值] 区间内）</span>
+                    </label>
+                    {(varForm.normalTruncated === true) && (
+                      <div className="grid grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <label className="label text-monte-danger">截断最小值 *</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={varForm.min ?? ''}
+                            onChange={e => {
+                              const v = e.target.value;
+                              setVarForm({ ...varForm, min: v === '' ? '' : Number(v) });
+                            }}
+                            placeholder="最小范围"
+                            className="input font-mono !border-monte-danger/50"
+                          />
+                        </div>
+                        <div>
+                          <label className="label text-monte-safe">截断最大值 *</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={varForm.max ?? ''}
+                            onChange={e => {
+                              const v = e.target.value;
+                              setVarForm({ ...varForm, max: v === '' ? '' : Number(v) });
+                            }}
+                            placeholder="最大范围"
+                            className="input font-mono !border-monte-safe/50"
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="label text-monte-muted text-xs">截断最大值（可选）</label>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={varForm.max ?? ''}
-                          onChange={e => {
-                            const v = e.target.value;
-                            setVarForm({ ...varForm, max: v === '' ? '' : Number(v) });
-                          }}
-                          placeholder="可选"
-                          className="input font-mono text-xs"
-                        />
-                      </div>
-                    </div>
+                    )}
+                    {!(varForm.normalTruncated === true) && (
+                      <p className="text-xs text-monte-muted">
+                        提示：不启用截断时，抽样结果为无界正态分布（理论上可以取任意值）
+                      </p>
+                    )}
                   </>
                 )}
 
@@ -1090,7 +1167,7 @@ export default function ProjectDetail() {
                     !varForm.name ||
                     ((varForm.distribution || 'triangular') === 'triangular' && (typeof varForm.min !== 'number' || typeof varForm.max !== 'number' || typeof varForm.mostLikely !== 'number')) ||
                     ((varForm.distribution || 'triangular') === 'uniform' && (typeof varForm.min !== 'number' || typeof varForm.max !== 'number')) ||
-                    ((varForm.distribution || 'triangular') === 'normal' && (varForm.normalMean === '' || varForm.normalStdDev === '' || Number(varForm.normalStdDev) <= 0))
+                    ((varForm.distribution || 'triangular') === 'normal' && (varForm.normalMean === '' || varForm.normalStdDev === '' || Number(varForm.normalStdDev) <= 0 || (varForm.normalTruncated === true && (varForm.min === '' || varForm.max === ''))))
                   }
                   className="btn-primary flex-1"
                 >

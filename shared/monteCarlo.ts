@@ -53,8 +53,23 @@ export function sampleDiscrete(options: DiscreteOption[]): number {
 export function sampleVariable(v: Variable): number {
   const dist = v.distribution || 'triangular';
   switch (dist) {
-    case 'normal':
-      return sampleNormal(v.normalMean ?? v.mostLikely, v.normalStdDev ?? (v.max - v.min) / 6);
+    case 'normal': {
+      const mean = v.normalMean ?? v.mostLikely;
+      const stdDev = v.normalStdDev ?? (v.max - v.min) / 6;
+      if (v.normalTruncated) {
+        const lo = Math.min(v.min, v.max);
+        const hi = Math.max(v.min, v.max);
+        if (lo === hi) return lo;
+        let attempts = 0;
+        while (attempts < 1000) {
+          const s = sampleNormal(mean, stdDev);
+          if (s >= lo && s <= hi) return s;
+          attempts++;
+        }
+        return Math.max(lo, Math.min(hi, sampleNormal(mean, stdDev)));
+      }
+      return sampleNormal(mean, stdDev);
+    }
     case 'uniform':
       return sampleUniform(v.min, v.max);
     case 'discrete':

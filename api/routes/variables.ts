@@ -29,6 +29,7 @@ router.put('/:id', (req: Request, res: Response) => {
   if (dto.distribution !== undefined) updates.distribution = dto.distribution;
   if (dto.normalMean !== undefined) updates.normalMean = Number(dto.normalMean);
   if (dto.normalStdDev !== undefined) updates.normalStdDev = Number(dto.normalStdDev);
+  if (dto.normalTruncated !== undefined) updates.normalTruncated = dto.normalTruncated === true ? true : undefined;
   if (dto.discreteOptions !== undefined) updates.discreteOptions = dto.discreteOptions;
 
   const distribution = dto.distribution ?? existing.distribution ?? 'triangular';
@@ -37,6 +38,7 @@ router.put('/:id', (req: Request, res: Response) => {
   const mostLikely = dto.mostLikely !== undefined ? Number(dto.mostLikely) : existing.mostLikely;
   const normalMean = dto.normalMean !== undefined ? Number(dto.normalMean) : existing.normalMean;
   const normalStdDev = dto.normalStdDev !== undefined ? Number(dto.normalStdDev) : existing.normalStdDev;
+  const normalTruncated = dto.normalTruncated !== undefined ? (dto.normalTruncated === true) : (existing.normalTruncated === true);
   const discreteOptions = dto.discreteOptions !== undefined ? dto.discreteOptions : existing.discreteOptions;
 
   if (distribution === 'triangular') {
@@ -61,6 +63,16 @@ router.put('/:id', (req: Request, res: Response) => {
     if (normalStdDev === undefined || isNaN(normalStdDev) || normalStdDev <= 0) {
       res.status(400).json({ error: '正态分布标准差必须为正数' });
       return;
+    }
+    if (normalTruncated) {
+      if (min === undefined || max === undefined || isNaN(min) || isNaN(max)) {
+        res.status(400).json({ error: '启用截断时必须填写最小值和最大值' });
+        return;
+      }
+      if (min >= max) {
+        res.status(400).json({ error: '最小值必须小于最大值' });
+        return;
+      }
     }
   } else if (distribution === 'discrete') {
     if (!discreteOptions || !Array.isArray(discreteOptions) || discreteOptions.length === 0) {

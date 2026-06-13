@@ -142,6 +142,16 @@ router.post('/:id/variables', (req: Request, res: Response) => {
       res.status(400).json({ error: '正态分布标准差必须为正数' });
       return;
     }
+    if (dto.normalTruncated) {
+      if (dto.min === undefined || dto.max === undefined || isNaN(Number(dto.min)) || isNaN(Number(dto.max))) {
+        res.status(400).json({ error: '启用截断时必须填写最小值和最大值' });
+        return;
+      }
+      if (Number(dto.min) >= Number(dto.max)) {
+        res.status(400).json({ error: '最小值必须小于最大值' });
+        return;
+      }
+    }
   } else if (distribution === 'discrete') {
     if (!dto.discreteOptions || !Array.isArray(dto.discreteOptions) || dto.discreteOptions.length === 0) {
       res.status(400).json({ error: '离散概率选项不能为空' });
@@ -168,6 +178,7 @@ router.post('/:id/variables', (req: Request, res: Response) => {
     distribution,
     normalMean: dto.normalMean !== undefined ? Number(dto.normalMean) : undefined,
     normalStdDev: dto.normalStdDev !== undefined ? Number(dto.normalStdDev) : undefined,
+    normalTruncated: dto.normalTruncated === true ? true : undefined,
     discreteOptions: dto.discreteOptions,
   };
 
